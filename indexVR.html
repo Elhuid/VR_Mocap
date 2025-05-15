@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <title>Quest Mocap Recorder</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      text-align: center;
+      margin-top: 2em;
+    }
+
+    button {
+      font-size: 1.2em;
+      margin: 0.5em;
+      padding: 0.5em 1.5em;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Meta Quest 2 Mocap Recorder</h1>
+  <button onclick="startRecording()">Record</button>
+  <button onclick="stopRecording()">Stop</button>
+  <button onclick="exportJSON()">Export</button>
+  <button onclick="clearData()">Delete</button>
+  <p id="status">Idle</p>
+
+  <script>
+    let recording = false;
+    let frameData = [];
+    let xrSession = null;
+    let xrRefSpace = null;
+
+    async function startRecording() {
+      if (navigator.xr) {
+        xrSession = await navigator.xr.requestSession("immersive-vr", { optionalFeatures: ["local-floor", "bounded-floor", "hand-tracking"] });
+        const gl = document.createElement('canvas').getContext('webgl', { xrCompatible: true });
+        await xrSession.updateRenderState({ baseLayer: new XRWebGLLayer(xrSession, gl) });
+
+        xrRefSpace = await xrSession.requestReferenceSpace('local-floor');
+        recording = true;
+        frameData = [];
+        document.getElementById("status").textContent = "Recording...";
+
+        xrSession.requestAnimationFrame(onXRFrame);
+      } else {
+        alert("WebXR not supported.");
+      }
+    }
+
+    function stopRecording() {
+      recording = false;
+      if (xrSession) {
+        xrSession.end();
+        xrSession = null;
+        document.getElementById("status").textContent = "Stopped.";
+      }
+    }
+
+    function clearData() {
+      frameData = [];
+      document.getElementById("status").textContent = "Data cleared.";
+    }
+
+    function exportJSON() {
+      const blob = new Blob([JSON.stringify(frameData, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "mocap_data.json";
+      a.click();
+      document.getElementById("status").textContent = "Exported JSON.";
+    }
+
+    function onXRFrame(time, frame) {
+      if (!recording || !xrSession) return;
+
+      const pose = frame.getViewerPose(xrRefSpace);
+      if (pose) {
+        const timestamp = performance.now();
+        const frameRecord = {
+          time: timestamp,
+          head: getPoseData(pose.views[0])
+        };
+
+        const inputSources = xrSession.inputSources;
+        for (const input of inputSources) {
+          if (input.hand) continue; // optional: handle hand tracking later
+          const gripPose = frame.getPose(input.gripSpace, xrRefSpace);
+          if (gripPose) {
+            const handedness = input.handedness; // "left" or "right"
+            frameRecord[handedness + "_hand"] = getPoseData(gripPose);
+          }
+        }
+
+        frameData.push(frameRecord);
+      }
+
+      xrSession.requestAnimationFrame(onXRFrame);
+    }
+
+    function getPoseData(pose) {
+      const { position, orientation } = pose.transform;
+      return {
+        pos: [position.x, position.y, position.z],
+        rot: [orientation.x, orientation.y, orientation.z, orientation.w]
+      };
+    }
+  </script>
+</body>
+
+</html>
