@@ -42,116 +42,115 @@
   <canvas id="xr-canvas"></canvas>
 
   <script>
-    let xrSession, xrRefSpace;
-    let recording = false;
-    let recordedFrames = [];
-    let startTime = null;
-    let baseOffsets = null;
+    window.onload = () => {
+      const canvas = document.getElementById('xr-canvas');
+      const gl = canvas.getContext('webgl', { xrCompatible: true });
 
-    const canvas = document.getElementById('xr-canvas');
-    const gl = canvas.getContext('webgl', { xrCompatible: true });
+      let xrSession, xrRefSpace;
+      let recording = false;
+      let recordedFrames = [];
+      let startTime = null;
+      let baseOffsets = null;
 
-    document.getElementById('enter-vr').onclick = async () => {
-      if (navigator.xr) {
+      document.getElementById('enter-vr').onclick = async () => {
+        if (!navigator.xr) return alert('WebXR not supported');
+
         xrSession = await navigator.xr.requestSession('immersive-vr');
+        await gl.makeXRCompatible();
         xrSession.updateRenderState({ baseLayer: new XRWebGLLayer(xrSession, gl) });
         xrRefSpace = await xrSession.requestReferenceSpace('local');
-
         xrSession.requestAnimationFrame(onXRFrame);
-      } else {
-        alert('WebXR not supported');
-      }
-    };
+      };
 
-    document.getElementById('record').onclick = () => {
-      recording = !recording;
-      document.getElementById('record').textContent = recording ? 'Stop Recording' : 'Start Recording';
-      if (!recording) {
-        document.getElementById('export').disabled = false;
-      } else {
-        recordedFrames = [];
-        startTime = null;
-        baseOffsets = null;
-      }
-    };
+      document.getElementById('record').onclick = () => {
+        recording = !recording;
+        document.getElementById('record').textContent = recording ? 'Stop Recording' : 'Start Recording';
+        document.getElementById('export').disabled = recording;
+        if (recording) {
+          recordedFrames = [];
+          startTime = null;
+          baseOffsets = null;
+        }
+      };
 
-    document.getElementById('export').onclick = () => {
-      const bvh = generateBVH(recordedFrames);
-      const blob = new Blob([bvh], { type: 'text/plain' });
-      const url = URL.createObjectURL(blob);
+      document.getElementById('export').onclick = () => {
+        const bvh = generateBVH(recordedFrames);
+        const blob = new Blob([bvh], { type: 'text/plain' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = 'motion_capture.bvh';
+        a.click();
+        URL.revokeObjectURL(a.href);
+      };
 
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'motion_capture.bvh';
-      a.click();
-      URL.revokeObjectURL(url);
-    };
+      function onXRFrame(time, frame) {
+        const session = frame.session;
+        session.requestAnimationFrame(onXRFrame);
+        const pose = frame.getViewerPose(xrRefSpace);
+        if (!pose) return;
 
-    function onXRFrame(time, frame) {
-      let session = frame.session;
-      session.requestAnimationFrame(onXRFrame);
-
-      const pose = frame.getViewerPose(xrRefSpace);
-      if (pose) {
-        let data = { time: time / 1000, headset: null, left: null, right: null };
-
-        data.headset = pose.transform;
+        const data = {
+          time: time / 1000,
+          headset: pose.transform,
+          left: null,
+          right: null
+        };
 
         for (const inputSource of session.inputSources) {
-          if (inputSource.gripSpace) {
-            const inputPose = frame.getPose(inputSource.gripSpace, xrRefSpace);
-            if (inputPose) {
-              if (inputSource.handedness === 'left') data.left = inputPose.transform;
-              else if (inputSource.handedness === 'right') data.right = inputPose.transform;
-            }
-          }
+          const grip = inputSource.gripSpace;
+          if (!grip) continue;
+
+          const inputPose = frame.getPose(grip, xrRefSpace);
+          if (!inputPose) continue;
+
+          if (inputSource.handedness === 'left') data.left = inputPose.transform;
+          if (inputSource.handedness === 'right') data.right = inputPose.transform;
         }
 
         if (recording) {
-          if (!startTime) startTime = time / 1000;
+          if (!startTime) startTime = data.time;
           if (!baseOffsets && data.left && data.right) {
             baseOffsets = {
               left: getOffset(data.headset.position, data.left.position),
-              right: getOffset(data.headset.position, data.right.position),
+              right: getOffset(data.headset.position, data.right.position)
             };
           }
-          recordedFrames.push({ ...data, time: (time / 1000 - startTime) });
+          recordedFrames.push({ ...data, time: data.time - startTime });
         }
       }
-    }
 
-    function getOffset(headPos, handPos) {
-      return {
-        x: handPos.x - headPos.x,
-        y: handPos.y - headPos.y,
-        z: handPos.z - headPos.z,
-      };
-    }
+      function getOffset(headPos, handPos) {
+        return {
+          x: handPos.x - headPos.x,
+          y: handPos.y - headPos.y,
+          z: handPos.z - headPos.z,
+        };
+      }
 
-    function quatToEuler(q) {
-      const ysqr = q.y * q.y;
+      function quatToEuler(q) {
+        const ysqr = q.y * q.y;
 
-      let t0 = +2.0 * (q.w * q.x + q.y * q.z);
-      let t1 = +1.0 - 2.0 * (q.x * q.x + ysqr);
-      let X = Math.atan2(t0, t1);
+        let t0 = +2.0 * (q.w * q.x + q.y * q.z);
+        let t1 = +1.0 - 2.0 * (q.x * q.x + ysqr);
+        let X = Math.atan2(t0, t1);
 
-      let t2 = +2.0 * (q.w * q.y - q.z * q.x);
-      t2 = t2 > 1.0 ? 1.0 : t2;
-      t2 = t2 < -1.0 ? -1.0 : t2;
-      let Y = Math.asin(t2);
+        let t2 = +2.0 * (q.w * q.y - q.z * q.x);
+        t2 = t2 > 1.0 ? 1.0 : t2;
+        t2 = t2 < -1.0 ? -1.0 : t2;
+        let Y = Math.asin(t2);
 
-      let t3 = +2.0 * (q.w * q.z + q.x * q.y);
-      let t4 = +1.0 - 2.0 * (ysqr + q.z * q.z);
-      let Z = Math.atan2(t3, t4);
+        let t3 = +2.0 * (q.w * q.z + q.x * q.y);
+        let t4 = +1.0 - 2.0 * (ysqr + q.z * q.z);
+        let Z = Math.atan2(t3, t4);
 
-      return [Z * 180 / Math.PI, X * 180 / Math.PI, Y * 180 / Math.PI];
-    }
+        return [Z * 180 / Math.PI, X * 180 / Math.PI, Y * 180 / Math.PI];
+      }
 
-    function generateBVH(frames) {
-      const leftOffset = baseOffsets ? baseOffsets.left : { x: 0, y: 0, z: 0 };
-      const rightOffset = baseOffsets ? baseOffsets.right : { x: 0, y: 0, z: 0 };
+      function generateBVH(frames) {
+        const leftOffset = baseOffsets ? baseOffsets.left : { x: 0, y: 0, z: 0 };
+        const rightOffset = baseOffsets ? baseOffsets.right : { x: 0, y: 0, z: 0 };
 
-      let output = `HIERARCHY
+        let output = `HIERARCHY
 ROOT Headset
 {
   OFFSET 0.00 0.00 0.00
@@ -180,27 +179,28 @@ Frames: ${frames.length}
 Frame Time: 0.0166667
 `;
 
-      for (const f of frames) {
-        const hp = f.headset?.position ?? { x: 0, y: 0, z: 0 };
-        const hq = f.headset?.orientation ?? { x: 0, y: 0, z: 0, w: 1 };
-        const lq = f.left?.orientation ?? { x: 0, y: 0, z: 0, w: 1 };
-        const rq = f.right?.orientation ?? { x: 0, y: 0, z: 0, w: 1 };
+        for (const f of frames) {
+          const hp = f.headset?.position ?? { x: 0, y: 0, z: 0 };
+          const hq = f.headset?.orientation ?? { x: 0, y: 0, z: 0, w: 1 };
+          const lq = f.left?.orientation ?? { x: 0, y: 0, z: 0, w: 1 };
+          const rq = f.right?.orientation ?? { x: 0, y: 0, z: 0, w: 1 };
 
-        const headEuler = quatToEuler(hq);
-        const leftEuler = quatToEuler(lq);
-        const rightEuler = quatToEuler(rq);
+          const headEuler = quatToEuler(hq);
+          const leftEuler = quatToEuler(lq);
+          const rightEuler = quatToEuler(rq);
 
-        const line = [
-          (hp.x * 100).toFixed(2),
-          (hp.y * 100).toFixed(2),
-          (hp.z * 100).toFixed(2),
-          ...headEuler.map(e => e.toFixed(2)),
-          ...leftEuler.map(e => e.toFixed(2)),
-          ...rightEuler.map(e => e.toFixed(2))
-        ].join(' ');
+          const line = [
+            (hp.x * 100).toFixed(2),
+            (hp.y * 100).toFixed(2),
+            (hp.z * 100).toFixed(2),
+            ...headEuler.map(e => e.toFixed(2)),
+            ...leftEuler.map(e => e.toFixed(2)),
+            ...rightEuler.map(e => e.toFixed(2))
+          ].join(' ');
 
-        output += line + '\n';
+          output += line + '\n';
+        }
+
+        return output;
       }
-
-      return output;
     }
