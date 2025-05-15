@@ -148,37 +148,59 @@
     }
 
     function generateBVH(frames) {
-      let output = "HIERARCHY\n";
-      output += "ROOT Headset\n{
-  OFFSET 0.00 0.00 0.00\n  CHANNELS 6 Xposition Yposition Zposition Zrotation Xrotation Yrotation\n  JOINT LeftHand\n  {
-    OFFSET " + (baseOffsets ? `${baseOffsets.left.x.toFixed(2)} ${baseOffsets.left.y.toFixed(2)} ${baseOffsets.left.z.toFixed(2)}` : "0 0 0") + "\n    CHANNELS 3 Zrotation Xrotation Yrotation\n    End Site { OFFSET 0 0 0 } \n
-      } \n  JOINT RightHand\n  {
-    OFFSET " + (baseOffsets ? `${baseOffsets.right.x.toFixed(2)} ${baseOffsets.right.y.toFixed(2)} ${baseOffsets.right.z.toFixed(2)}` : "0 0 0") + "\n    CHANNELS 3 Zrotation Xrotation Yrotation\n    End Site { OFFSET 0 0 0 } \n
-      } \n
-    } \n";
-    output += "MOTION\n";
-    output += `Frames: ${frames.length}\n`;
-    output += "Frame Time: 0.0166667\n"; // ~60Hz
+      const leftOffset = baseOffsets ? baseOffsets.left : { x: 0, y: 0, z: 0 };
+      const rightOffset = baseOffsets ? baseOffsets.right : { x: 0, y: 0, z: 0 };
 
-    for (const f of frames) {
-      const hp = f.headset?.position ?? { x: 0, y: 0, z: 0 };
-      const hq = f.headset?.orientation ?? { x: 0, y: 0, z: 0, w: 1 };
-      const lq = f.left?.orientation ?? { x: 0, y: 0, z: 0, w: 1 };
-      const rq = f.right?.orientation ?? { x: 0, y: 0, z: 0, w: 1 };
-
-      const headEuler = quatToEuler(hq);
-      const leftEuler = quatToEuler(lq);
-      const rightEuler = quatToEuler(rq);
-
-      output += `${(hp.x * 100).toFixed(2)} ${(hp.y * 100).toFixed(2)} ${(hp.z * 100).toFixed(2)} ` +
-        `${headEuler.map(e => e.toFixed(2)).join(' ')} ` +
-        `${leftEuler.map(e => e.toFixed(2)).join(' ')} ` +
-        `${rightEuler.map(e => e.toFixed(2)).join(' ')}\n`;
+      let output = `HIERARCHY
+ROOT Headset
+{
+  OFFSET 0.00 0.00 0.00
+  CHANNELS 6 Xposition Yposition Zposition Zrotation Xrotation Yrotation
+  JOINT LeftHand
+  {
+    OFFSET ${leftOffset.x.toFixed(2)} ${leftOffset.y.toFixed(2)} ${leftOffset.z.toFixed(2)}
+    CHANNELS 3 Zrotation Xrotation Yrotation
+    End Site
+    {
+      OFFSET 0.00 0.00 0.00
     }
-
-    return output;
+  }
+  JOINT RightHand
+  {
+    OFFSET ${rightOffset.x.toFixed(2)} ${rightOffset.y.toFixed(2)} ${rightOffset.z.toFixed(2)}
+    CHANNELS 3 Zrotation Xrotation Yrotation
+    End Site
+    {
+      OFFSET 0.00 0.00 0.00
     }
-  </script>
-</body>
+  }
+}
+MOTION
+Frames: ${frames.length}
+Frame Time: 0.0166667
+`;
 
-</html>
+      for (const f of frames) {
+        const hp = f.headset?.position ?? { x: 0, y: 0, z: 0 };
+        const hq = f.headset?.orientation ?? { x: 0, y: 0, z: 0, w: 1 };
+        const lq = f.left?.orientation ?? { x: 0, y: 0, z: 0, w: 1 };
+        const rq = f.right?.orientation ?? { x: 0, y: 0, z: 0, w: 1 };
+
+        const headEuler = quatToEuler(hq);
+        const leftEuler = quatToEuler(lq);
+        const rightEuler = quatToEuler(rq);
+
+        const line = [
+          (hp.x * 100).toFixed(2),
+          (hp.y * 100).toFixed(2),
+          (hp.z * 100).toFixed(2),
+          ...headEuler.map(e => e.toFixed(2)),
+          ...leftEuler.map(e => e.toFixed(2)),
+          ...rightEuler.map(e => e.toFixed(2))
+        ].join(' ');
+
+        output += line + '\n';
+      }
+
+      return output;
+    }
